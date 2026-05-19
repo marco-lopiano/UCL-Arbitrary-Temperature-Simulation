@@ -147,15 +147,13 @@ class Calendar {
         };
 
         vector<Slot> buildSlots() {
-            for (int t = 0; t < (int)teams.size(); ++t) {
-                for (int p = 0; p < 4; ++p) {
-                    for (int ha = 0; ha < 2; ++ha) {
-                        slots.push_back({t, p, ha});
-                    }
-                }
-            }
-            return slots;
-        };
+            vector<Slot> result;
+            for (int t = 0; t < (int)teams.size(); ++t)
+                for (int p = 0; p < 4; ++p)
+                    for (int ha = 0; ha < 2; ++ha)
+                        result.push_back({t, p, ha});
+            return result; // don't write to this->slots
+        }
 
         bool isValid(int t, int opp, int pot, int ha) {
             // Team cannot play itself
@@ -247,29 +245,71 @@ class Calendar {
             return candidates;
         };
 
-        bool solveSlots(const vector<Slot>& slots, int idx = 0) {
+        // Forward checking: after placing a match, verify no other unfilled slot
+        // is left with zero candidates. If so, prune immediately.
+        bool forwardCheck(const vector<Slot>& slots, int afterIdx) {
+            for (int i = afterIdx; i < (int)slots.size(); ++i) {
+                auto [t, pot, ha] = slots[i];
+                if (teams[t].pots[pot][ha] != -1)
+                    continue; // already filled, skip
+                if (getCandidates(t, pot, ha).empty())
+                    return false; // deadlock detected early
+            }
+            return true;
+        }
+
+        // Dynamic MRV: at each step, pick the unfilled slot with fewest candidates
+        // among the remaining slots (starting from idx), swap it into position.
+        bool solveSlots(vector<Slot>& slots, int idx = 0) {
             if (idx == (int)slots.size())
                 return true;
 
+            // Skip already-filled slots
+            while (idx < (int)slots.size() &&
+                teams[slots[idx].team].pots[slots[idx].pot][slots[idx].ha] != -1)
+                ++idx;
+
+            if (idx == (int)slots.size())
+                return true;
+
+            // Dynamic MRV: find the unfilled slot with fewest candidates
+            int bestIdx = idx;
+            int bestCount = INT_MAX;
+            for (int i = idx; i < (int)slots.size(); ++i) {
+                auto [t, pot, ha] = slots[i];
+                if (teams[t].pots[pot][ha] != -1)
+                    continue;
+                int count = getCandidates(t, pot, ha).size();
+                if (count < bestCount) {
+                    bestCount = count;
+                    bestIdx = i;
+                    if (count == 0) break; // can't do worse
+                }
+            }
+
+            // Swap best slot into current position
+            swap(slots[idx], slots[bestIdx]);
             auto [t, pot, ha] = slots[idx];
 
-            // Already filled? Skip
-            if (teams[t].pots[pot][ha] != -1)
-                return solveSlots(slots, idx + 1);
+            // Deadlock: no candidates for the most-constrained slot
+            if (bestCount == 0)
+                return false;
 
             auto candidates = getCandidates(t, pot, ha);
-
             for (int opp : candidates) {
                 placeMatch(t, opp, pot, ha);
 
-                if (solveSlots(slots, idx + 1))
+                // Forward check before recursing
+                if (forwardCheck(slots, idx + 1) && solveSlots(slots, idx + 1))
                     return true;
 
                 undoMatch(t, opp, pot, ha);
             }
 
+            // Restore slot order on backtrack
+            swap(slots[idx], slots[bestIdx]);
             return false;
-        };
+        }
 
         int slotDifficulty(const Slot& s) {
             return getCandidates(s.team, s.pot, s.ha).size();
@@ -277,15 +317,27 @@ class Calendar {
 
 
         bool buildCalendar() {
-            auto slots = buildSlots();
+            // Retry with seed jitter if solver gets stuck
+            constexpr int MAX_ATTEMPTS = 20;
+            auto baseSlots = buildSlots();
 
-            sort(slots.begin(), slots.end(),
-                [this](const Slot& a, const Slot& b) {
-                    return slotDifficulty(a) < slotDifficulty(b);
-                });
+            for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+                // Reset all team assignments
+                for (auto& t : teams)
+                    t.pots = {{ {-1,-1}, {-1,-1}, {-1,-1}, {-1,-1} }};
 
-            return solveSlots(slots);
-        };
+                // Re-seed RNG with jitter so candidate shuffle varies
+                rng.seed(rng()); 
+
+                auto slots = baseSlots;
+                if (solveSlots(slots)) {
+                    if (attempt > 0)
+                        cout << "Solved on attempt " << (attempt + 1) << "\n";
+                    return true;
+                }
+            }
+            return false;
+        }
 
 };
 
