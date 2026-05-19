@@ -34,11 +34,11 @@ struct Slot {
 
 // TODO: Possible optimizations:
 // Candidate ordering (least-constraining value) -> Reduces recursion depth
-// Forward checking (early deadlock detection)	-> Prevents deep wasted recursion
 // Caching candidate count -> Avoids recomputing validity each call
 // Weighted heuristics (regions, pots) -> Further improves MRV ordering
-// Retry / alternate -> seeds	Safety net for unlucky seeds
-// Parallel attempts -> For massive speedup if needed
+// Parallel attempts -> For massive speedup if needed (possible CUDA lib implementation/wrapper?)
+
+// TODO: write a calendar save in json file for later use
 
 class Calendar {
     private:
@@ -315,7 +315,6 @@ class Calendar {
             return getCandidates(s.team, s.pot, s.ha).size();
         }
 
-
         bool buildCalendar() {
             // Retry with seed jitter if solver gets stuck
             constexpr int MAX_ATTEMPTS = 20;
@@ -340,7 +339,6 @@ class Calendar {
         }
 
 };
-
 
 int main(int argc, char* argv[]) {
 
